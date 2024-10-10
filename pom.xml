@@ -44,10 +44,10 @@
 			<version>${openapi.version}</version>
 		</dependency>
 
-		<!-- H2 Database (adicionado via Spring Initializr) -->
+		<!-- MySQL Database -->
 		<dependency>
-			<groupId>com.h2database</groupId>
-			<artifactId>h2</artifactId>
+			<groupId>mysql</groupId>
+			<artifactId>mysql-connector-java</artifactId>
 			<scope>runtime</scope>
 		</dependency>
 
