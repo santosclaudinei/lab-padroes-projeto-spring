@@ -1,83 +1,122 @@
 package one.digitalinnovation.gof.service.impl;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
-import org.springframework.beans.factory.annotation.Autowired;
+import one.digitalinnovation.gof.dto.ClienteDTO;
+import one.digitalinnovation.gof.dto.ClienteUpdate;
+import one.digitalinnovation.gof.dto.EnderecoDTO;
 import org.springframework.stereotype.Service;
 
 import one.digitalinnovation.gof.model.Cliente;
-import one.digitalinnovation.gof.model.ClienteRepository;
+import one.digitalinnovation.gof.repository.ClienteRepository;
 import one.digitalinnovation.gof.model.Endereco;
-import one.digitalinnovation.gof.model.EnderecoRepository;
+import one.digitalinnovation.gof.repository.EnderecoRepository;
 import one.digitalinnovation.gof.service.ClienteService;
 import one.digitalinnovation.gof.service.ViaCepService;
 
-/**
- * Implementação da <b>Strategy</b> {@link ClienteService}, a qual pode ser
- * injetada pelo Spring (via {@link Autowired}). Com isso, como essa classe é um
- * {@link Service}, ela será tratada como um <b>Singleton</b>.
- * 
- * @author falvojr
- */
+import javax.persistence.EntityNotFoundException;
+
 @Service
 public class ClienteServiceImpl implements ClienteService {
 
-	// Singleton: Injetar os componentes do Spring com @Autowired.
-	@Autowired
-	private ClienteRepository clienteRepository;
-	@Autowired
-	private EnderecoRepository enderecoRepository;
-	@Autowired
-	private ViaCepService viaCepService;
-	
-	// Strategy: Implementar os métodos definidos na interface.
-	// Facade: Abstrair integrações com subsistemas, provendo uma interface simples.
+	private final ClienteRepository clienteRepository;
+	private final EnderecoRepository enderecoRepository;
+	private final ViaCepService viaCepService;
 
-	@Override
-	public Iterable<Cliente> buscarTodos() {
-		// Buscar todos os Clientes.
-		return clienteRepository.findAll();
+	public ClienteServiceImpl(ClienteRepository clienteRepository, EnderecoRepository enderecoRepository, ViaCepService viaCepService) {
+		this.clienteRepository = clienteRepository;
+		this.enderecoRepository = enderecoRepository;
+		this.viaCepService = viaCepService;
 	}
 
 	@Override
-	public Cliente buscarPorId(Long id) {
-		// Buscar Cliente por ID.
-		Optional<Cliente> cliente = clienteRepository.findById(id);
-		return cliente.get();
-	}
+	public Iterable<ClienteDTO> buscarTodos() {
+		Iterable<Cliente> clientes = clienteRepository.findAll();
+		List<ClienteDTO> clienteDTOList = new ArrayList<>();
 
-	@Override
-	public void inserir(Cliente cliente) {
-		salvarClienteComCep(cliente);
-	}
-
-	@Override
-	public void atualizar(Long id, Cliente cliente) {
-		// Buscar Cliente por ID, caso exista:
-		Optional<Cliente> clienteBd = clienteRepository.findById(id);
-		if (clienteBd.isPresent()) {
-			salvarClienteComCep(cliente);
+		for (Cliente cliente : clientes) {
+			ClienteDTO clienteDTO = converteClienteParaDTO(cliente);
+			clienteDTOList.add(clienteDTO);
 		}
+
+		return clienteDTOList;
+	}
+
+	@Override
+	public ClienteDTO buscarPorId(Long id) {
+		Optional<Cliente> cliente = clienteRepository.findById(id);
+
+		if (cliente.isPresent())
+			return converteClienteParaDTO(cliente.get());
+
+		throw new EntityNotFoundException("Cliente com ID " + id + " não encontrado");
+	}
+
+	@Override
+	public Cliente inserir(ClienteDTO clienteDTO) {
+		Cliente cliente = salvarClienteDTOComCep(clienteDTO);
+
+		return clienteRepository.save(cliente);
+	}
+
+	@Override
+	public void atualizar(Long id, ClienteUpdate clienteUpdate) {
+		Cliente clienteExistente = clienteRepository.findById(id)
+				.orElseThrow(() -> new EntityNotFoundException("Cliente com ID " + id + " não encontrado"));
+
+		clienteExistente.setNome(clienteUpdate.getNome());
+		clienteExistente.setEndereco(buscarOuCriarEndereco(clienteUpdate.getCep()));
+
+		clienteRepository.save(clienteExistente);
 	}
 
 	@Override
 	public void deletar(Long id) {
-		// Deletar Cliente por ID.
+		if (!clienteRepository.existsById(id)) {
+			throw new EntityNotFoundException("Cliente com ID " + id + " não encontrado");
+		}
+
 		clienteRepository.deleteById(id);
 	}
 
-	private void salvarClienteComCep(Cliente cliente) {
-		// Verificar se o Endereco do Cliente já existe (pelo CEP).
-		String cep = cliente.getEndereco().getCep();
-		Endereco endereco = enderecoRepository.findById(cep).orElseGet(() -> {
-			// Caso não exista, integrar com o ViaCEP e persistir o retorno.
+	private Endereco buscarOuCriarEndereco(String cep) {
+		return enderecoRepository.findById(cep).orElseGet(() -> {
 			Endereco novoEndereco = viaCepService.consultarCep(cep);
-			enderecoRepository.save(novoEndereco);
-			return novoEndereco;
+			novoEndereco.setCep(cep);
+			return enderecoRepository.save(novoEndereco);
 		});
-		cliente.setEndereco(endereco);
-		// Inserir Cliente, vinculando o Endereco (novo ou existente).
-		clienteRepository.save(cliente);
 	}
 
+	private Cliente salvarClienteDTOComCep(ClienteDTO clienteDTO) {
+		Endereco endereco = buscarOuCriarEndereco(clienteDTO.getCep());
+		return ConverteDTOParaCliente(clienteDTO, endereco);
+	}
+
+	private Cliente ConverteDTOParaCliente(ClienteDTO clienteDTO, Endereco endereco) {
+		Cliente cliente = new Cliente();
+		cliente.setNome(clienteDTO.getNome());
+		cliente.setEndereco(endereco);
+
+		return cliente;
+	}
+
+	private ClienteDTO converteClienteParaDTO(Cliente cliente) {
+		ClienteDTO clienteDTO = new ClienteDTO();
+		clienteDTO.setId(cliente.getId());
+		clienteDTO.setNome(cliente.getNome());
+		clienteDTO.setCep(cliente.getEndereco().getCep());
+
+		EnderecoDTO enderecoDTO = new EnderecoDTO();
+		Endereco endereco = cliente.getEndereco();
+		enderecoDTO.setLogradouro(endereco.getLogradouro());
+		enderecoDTO.setComplemento(endereco.getComplemento());
+		enderecoDTO.setBairro(endereco.getBairro());
+		enderecoDTO.setLocalidade(endereco.getLocalidade());
+		enderecoDTO.setUf(endereco.getUf());
+
+		clienteDTO.setEnderecoDTO(enderecoDTO);
+		return clienteDTO;
+	}
 }
